@@ -27,6 +27,8 @@ async def cleanup_db():
         await conn.execute(text("DROP TABLE IF EXISTS search_requests CASCADE;"))
         await conn.execute(text("DROP TABLE IF EXISTS provider_errors CASCADE;"))
         await conn.execute(text("DROP TABLE IF EXISTS improvement_suggestions CASCADE;"))
+        await conn.execute(text("DROP TABLE IF EXISTS query_classifier_keys CASCADE;"))
+        await conn.execute(text("DROP TABLE IF EXISTS query_classifier CASCADE;")) # Handle potential literal name
         
         # Alembic
         await conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE;"))

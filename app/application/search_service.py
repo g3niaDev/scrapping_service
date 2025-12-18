@@ -2,33 +2,39 @@ from uuid import UUID
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from app.domain.models import SearchRequest, SearchRequestStatus, QueryType
+from app.domain.models import SearchRequest, SearchRequestStatus, QueryType, QueryClassifierKey
 from app.api.schemas import SearchRequestCreate, DisambiguationInput, ConfirmationInput
-from app.domain.models import SearchRequest
+from app.config.settings import settings
 
 class QueryRouter:
     """Classifies the intent of the query."""
     
     @staticmethod
-    def rank_intent(text: str) -> QueryType:
+    def rank_intent(text: str, classifier_keys: List[QueryClassifierKey]) -> List[QueryType]:
         t = text.lower()
+        found_types = set()
+        
+        # 1. Direct Web Page Check
         if "http" in t or ".com" in t or "www." in t:
-            return QueryType.WEB_PAGE
+            return [QueryType.WEB_PAGE]
         
-        # Simple heuristics for MVP
-        if any(x in t for x in ["persona", "perfil", "recruiter", "manager", "ingeniero", "developer"]):
-            return QueryType.PERSON
-        if any(x in t for x in ["empresa", "company", "startup", "inc", "llc", "s.a."]):
-            return QueryType.COMPANY
-        if any(x in t for x in ["tema", "trend", "mercado", "historia", "resumen"]):
-            return QueryType.TOPIC
+        # 2. Match keywords from DB
+        for ck in classifier_keys:
+            if not ck.is_stopword and ck.word.lower() in t:
+                found_types.add(ck.query_type)
         
-        # Default fallback: if it looks like a name (2-3 words), maybe person, else topic
-        words = t.split()
-        if 2 <= len(words) <= 3 and not any(x in t for x in ["historia", "qué", "donde"]):
-            return QueryType.PERSON
+        # 3. Fallback: Multi-language Name Heuristic
+        stopwords = [k.word for k in classifier_keys if k.is_stopword]
+        raw_words = t.split()
+        meaningful_words = [w for w in raw_words if w not in stopwords]
+        
+        if 2 <= len(meaningful_words) <= settings.PERSON_NAME_MAX_WORDS:
+            found_types.add(QueryType.PERSON)
             
-        return QueryType.TOPIC # Fallback
+        if not found_types:
+            return [QueryType.TOPIC]
+            
+        return list(found_types)
 
 class ResolutionOrchestrator:
     """Determines what is missing to resolve the query."""
@@ -46,9 +52,7 @@ class ResolutionOrchestrator:
 
         # 2. Ready for Candidates?
         if request.status == SearchRequestStatus.CANDIDATES_READY or request.status == SearchRequestStatus.AWAITING_CONFIRMATION:
-             # Retuning candidates from DB JSON
              candidates = request.candidates_json or []
-             # Convert dicts back to schema friendly if strictly needed, but dicts work fine if keys match
              return {"action": "select_candidate", "candidates": candidates}
         
         # 3. Confirmed
@@ -59,8 +63,20 @@ class ResolutionOrchestrator:
 
     @staticmethod
     def _generate_questions(request: SearchRequest) -> list:
+        # Check for Intent Ambiguity first
+        intent_info = request.resolved_intent_json or {}
+        potential_types = intent_info.get("potential_types", [])
+        
+        if request.query_type == QueryType.UNKNOWN and len(potential_types) > 1:
+            options = [{"value": t, "label": t.title()} for t in potential_types]
+            return [{
+                "key": "intent",
+                "text": "¿Qué estás buscando exactamente?",
+                "type": "select",
+                "options": options
+            }]
+
         q_type = request.query_type
-        # If we have previous answers, we check what is STILL missing
         existing_answers = request.disambiguation_answers_json or {}
         
         needed = []
@@ -154,32 +170,35 @@ class SearchService:
         self.db = db
 
     async def create_request(self, data: SearchRequestCreate) -> SearchRequest:
-        # 1. Classify
-        q_type = QueryRouter.rank_intent(data.query_text)
+        # 1. Fetch all classification keys (keywords and stopwords)
+        result = await self.db.execute(select(QueryClassifierKey))
+        classifier_keys = result.scalars().all()
+
+        # 2. Classify intent
+        q_types = QueryRouter.rank_intent(data.query_text, classifier_keys)
         
         req = SearchRequest(
             query_text=data.query_text,
-            query_type=q_type,
             user_id=data.context.user_id,
             event_id=data.context.event_id,
             tenant_id=data.context.tenant_id,
             origin_app=data.context.origin_app
         )
         
-        # 2. Initial Status Check
-        # If WEB_PAGE (url), we might skip disambiguation if valid
-        if q_type == QueryType.WEB_PAGE:
-             req.status = SearchRequestStatus.AWAITING_CONFIRMATION
-             req.candidates_json = ResolutionOrchestrator.resolve_candidates(req)
-        elif q_type == QueryType.UNKNOWN:
-             req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
+        # 3. Handle Classification results
+        if len(q_types) == 1:
+            req.query_type = q_types[0]
+            # If WEB_PAGE (url), we might skip disambiguation if valid
+            if req.query_type == QueryType.WEB_PAGE:
+                 req.status = SearchRequestStatus.AWAITING_CONFIRMATION
+                 req.candidates_json = ResolutionOrchestrator.resolve_candidates(req)
+            else:
+                 req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
         else:
-            # Person, Company, Topic -> Check if we need to disambiguate immediately
-            # For this strict flow, let's always verify we have minimal fields.
-            # But initial creation has no "answers" yet.
-            # So creating a request usually leads to "needs_disambiguation" unless query is very rich?
-            # Let's default to needs_disambiguation for structured types.
+             # AMBIGUITY DETECTED
+             req.query_type = QueryType.UNKNOWN
              req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
+             req.resolved_intent_json = {"potential_types": q_types}
 
         self.db.add(req)
         await self.db.commit()
@@ -200,8 +219,11 @@ class SearchService:
         current_answers.update(data.answers)
         req.disambiguation_answers_json = current_answers
         
+        # Check if user resolved the intent ambiguity
+        if "intent" in data.answers and req.query_type == QueryType.UNKNOWN:
+            req.query_type = data.answers["intent"]
+        
         # Check if enough info now
-        # Call Orchestrator to see if any questions remain
         remaining_questions = ResolutionOrchestrator._generate_questions(req)
         
         if not remaining_questions:

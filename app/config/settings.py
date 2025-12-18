@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     LOG_LEVEL: str = "INFO"
 
+    # Query Classification Heuristics
+    PERSON_NAME_MAX_WORDS: int = 3
+
     class Config:
         env_file = ".env"
 

@@ -123,3 +123,12 @@ class ImprovementSuggestion(SQLModel, table=True):
     suggestion_type: str
     description: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class QueryClassifierKey(SQLModel, table=True):
+    __tablename__ = "query_classifier_keys"
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    word: str = Field(index=True)
+    query_type: QueryType = Field(index=True)
+    language: str = Field(default="pt", index=True)
+    is_stopword: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
