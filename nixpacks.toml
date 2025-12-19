@@ -1,3 +1,0 @@
-[phases.setup]
-nixPkgs = ["python311"]
-aptPkgs = ["libpq5", "libpq-dev"]
