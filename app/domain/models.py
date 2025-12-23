@@ -22,6 +22,14 @@ class QueryType(str, Enum):
     TOPIC = "TOPIC"
     WEB_PAGE = "WEB_PAGE"
     UNKNOWN = "UNKNOWN"
+    # Granular types for refinement
+    PROFILE = "PROFILE"
+    COMPANY_PAGE = "COMPANY_PAGE"
+    ARTICLE = "ARTICLE"
+    LISTING = "LISTING"
+    SEARCH_PAGE = "SEARCH_PAGE"
+    JOB = "JOB"
+    SCHOOL = "SCHOOL"
 
 class JobStatus(str, Enum):
     PENDING = "pending"
