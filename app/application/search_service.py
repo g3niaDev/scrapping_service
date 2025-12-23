@@ -58,7 +58,6 @@ class ResolutionOrchestrator:
         if request.status == SearchRequestStatus.NEEDS_DISAMBIGUATION:
             questions = ResolutionOrchestrator._generate_questions(request)
             return {"action": "provide_disambiguation", "questions": questions}
-| 
         # 2. Ready for Candidates?
         if request.status == SearchRequestStatus.CANDIDATES_READY or request.status == SearchRequestStatus.AWAITING_CONFIRMATION:
              candidates = request.candidates_json or []
