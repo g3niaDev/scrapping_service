@@ -95,10 +95,9 @@ class ResolutionOrchestrator:
         existing_answers = request.disambiguation_answers_json or {}
         
         needed = []
-        # We always ask for specific details for non-URL queries on the first pass
-        # unless it's a refinement or truly unknown/empty
         is_refinement = existing_answers.get("needs_refinement", False)
 
+        # Basic context questions (The "Friction")
         if q_type == QueryType.PERSON:
             if "location" not in existing_answers:
                 needed.append({"key": "location", "text": "Em qual país/cidade trabalha?", "type": "text"})
@@ -126,8 +125,8 @@ class ResolutionOrchestrator:
              if "scope" not in existing_answers:
                   needed.append({"key": "scope", "text": "Escopo (País/Setor/Período)?", "type": "text"})
 
-        # Special case: Extra details prompt
-        if existing_answers.get("needs_refinement") and "extra_context" not in existing_answers:
+        # Special case: Extra details prompt ONLY if refinement was explicitly requested
+        if is_refinement and "extra_context" not in existing_answers:
             needed.append({
                 "key": "extra_context", 
                 "text": "Não encontramos o que você procurava. Pode fornecer mais detalhes ou corrigir algum dato?", 
@@ -388,3 +387,23 @@ class SearchService:
         await self.db.delete(req)
         await self.db.commit()
         return True
+
+    async def refine_request(self, request_id: UUID) -> SearchRequest:
+        req = await self.get_request(request_id)
+        if not req:
+             raise ValueError("Request not found")
+             
+        current_answers = req.disambiguation_answers_json or {}
+        current_answers["needs_refinement"] = True
+        # Clear extra context to force re-ask
+        current_answers.pop("extra_context", None)
+        
+        req.disambiguation_answers_json = current_answers
+        req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
+        # Clear candidates to show we are searching again
+        req.candidates_json = []
+        
+        self.db.add(req)
+        await self.db.commit()
+        await self.db.refresh(req)
+        return req

@@ -117,3 +117,27 @@ async def delete_search_request(
     if not success:
         raise HTTPException(status_code=404, detail="SearchRequest not found")
     return None
+
+@router.post(
+    "/requests/{request_id}/refine", 
+    response_model=SearchRequestResponse,
+    summary="Refine Search Request",
+    description="Explicitly triggers a refinement flow to add more context to the search."
+)
+async def refine_search_request(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    service = SearchService(db)
+    try:
+        req = await service.refine_request(request_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+        
+    next_step = ResolutionOrchestrator.get_next_step(req)
+    return SearchRequestResponse(
+        request_id=req.id,
+        status=req.status,
+        query_type=req.query_type,
+        next=NextAction(**next_step)
+    )
