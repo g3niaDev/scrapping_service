@@ -12,6 +12,27 @@ Microservicio backend inteligente para investigación automatizada. Refactorizad
 ## API Flow (Search State Machine)
 
 El servicio ya no usa sesiones de chat. Ahora usa **Search Requests** deterministas.
+ 
+## Configuración de Búsqueda (Google Custom Search)
+ 
+ El motor de búsqueda está configurado para un alcance global y alta precisión:
+ - **Cobertura**: Soporta todas las regiones y todos los idiomas.
+ - **Exclusiones de LinkedIn**: Para garantizar enlaces directos a perfiles y empresas, el sistema descarta automáticamente los siguientes patrones:
+     - `linkedin.com/search/*`
+     - `linkedin.com/results/*`
+     - `linkedin.com/pub/dir/*`
+     - `linkedin.com/jobs/*`
+     - `linkedin.com/news/*`
+     - `linkedin.com/login*`
+     - `linkedin.com/signup*`
+     - `linkedin.com/checkpoint/*`
+     - `linkedin.com/authwall/*`
+     - `linkedin.com/mynetwork/*`
+     - `linkedin.com/notifications/*`
+     - `linkedin.com/messaging/*`
+     - `linkedin.com/static/*`
+     - `linkedin.com/li/*`
+
 
 ### 1. Iniciar Búsqueda
 **Endpoint**: `POST /v1/search/requests`

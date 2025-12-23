@@ -131,8 +131,7 @@ class ResolutionOrchestrator:
         platform = (answers.get("search_platform") or "google").lower()
         context = answers.get("search_context", "")
 
-        # Target identifiers and exclusions
-        exclusions = ""
+        # Target identifier
         site_base = ""
 
         if platform == "linkedin":
@@ -142,13 +141,12 @@ class ResolutionOrchestrator:
                 site_base = "site:linkedin.com/company/"
             else:
                 site_base = "site:linkedin.com"
-            exclusions = "-inurl:/pub/dir -inurl:/search/ -inurl:/results/ -intitle:profiles"
         else:
             if platform != "google":
                 site_base = f"site:{platform}.com"
 
-        # Construct Global Query
-        search_query = f'"{query_text}" {context} {site_base} {exclusions}'.strip()
+        # Construct Global Query (Simple & Direct)
+        search_query = f'"{query_text}" {context} {site_base}'.strip()
 
         client = GoogleSearchClient()
         try:
@@ -157,18 +155,8 @@ class ResolutionOrchestrator:
             print(f"Error calling Google Search: {e}")
             results = []
 
-        # Result Filtering (Discard anything that still looks like a directory)
-        filtered_results = []
-        skip_patterns = ["/pub/dir", "/search/", "/results/", "/dir/"]
-        
-        for res in results:
-            link = res["link"].lower()
-            if any(p in link for p in skip_patterns):
-                continue
-            filtered_results.append(res)
-            
         candidates = []
-        for i, res in enumerate(filtered_results[:6]):
+        for i, res in enumerate(results[:6]):
             # Simple type inference for visual feedback
             inferred_type = qt
             link = res["link"].lower()
