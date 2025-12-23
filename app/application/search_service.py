@@ -164,8 +164,9 @@ class ResolutionOrchestrator:
             loc = answers.get("location", "")
             role = answers.get("role", "")
             company = answers.get("company_or_industry", "")
-            social = answers.get("social_network", "")
+            social = (answers.get("social_network") or "").lower()
             site_limit = f"site:{social}.com" if social and social != "any" else ""
+                
             search_query = f"{query_text} {role} {company} {loc} {site_limit}".strip()
         elif qt == QueryType.COMPANY:
             country = answers.get("country", "")
