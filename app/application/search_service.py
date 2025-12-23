@@ -77,10 +77,16 @@ class ResolutionOrchestrator:
         potential_types = intent_info.get("potential_types", [])
         
         if request.query_type == QueryType.UNKNOWN and len(potential_types) > 1:
-            options = [{"value": t, "label": t.title()} for t in potential_types]
+            intent_labels = {
+                QueryType.PERSON: "Pessoa",
+                QueryType.COMPANY: "Empresa",
+                QueryType.TOPIC: "Tópico",
+                QueryType.WEB_PAGE: "Página Web"
+            }
+            options = [{"value": t, "label": intent_labels.get(t, t.title())} for t in potential_types]
             return [{
                 "key": "intent",
-                "text": "¿Qué estás buscando exactamente?",
+                "text": "O que você está procurando exatamente?",
                 "type": "select",
                 "options": options
             }]
@@ -91,36 +97,36 @@ class ResolutionOrchestrator:
         needed = []
         if q_type == QueryType.PERSON:
             if "location" not in existing_answers:
-                needed.append({"key": "location", "text": "¿En qué país/ciudad trabaja?", "type": "text"})
+                needed.append({"key": "location", "text": "Em qual país/cidade trabalha?", "type": "text"})
             if "company_or_industry" not in existing_answers:
-                needed.append({"key": "company_or_industry", "text": "¿Empresa actual o industria?", "type": "text"})
+                needed.append({"key": "company_or_industry", "text": "Empresa atual ou setor?", "type": "text"})
             if "role" not in existing_answers:
-                 needed.append({"key": "role", "text": "¿Rol aproximado?", "type": "text"})
+                 needed.append({"key": "role", "text": "Cargo aproximado?", "type": "text"})
             if "social_network" not in existing_answers:
                 needed.append({
                     "key": "social_network", 
-                    "text": "¿En qué red social prefieres buscar?", 
+                    "text": "Em qual rede social prefere buscar?", 
                     "type": "select",
                     "options": [
                         {"value": "linkedin", "label": "LinkedIn"},
                         {"value": "twitter", "label": "Twitter/X"},
                         {"value": "instagram", "label": "Instagram"},
                         {"value": "github", "label": "GitHub"},
-                        {"value": "any", "label": "Cualquiera"}
+                        {"value": "any", "label": "Qualquer uma"}
                     ]
                 })
         elif q_type == QueryType.COMPANY:
             if "country" not in existing_answers:
-                 needed.append({"key": "country", "text": "¿País de la empresa?", "type": "text"})
+                 needed.append({"key": "country", "text": "País da empresa?", "type": "text"})
         elif q_type == QueryType.TOPIC:
              if "scope" not in existing_answers:
-                  needed.append({"key": "scope", "text": "¿Alcance (País/Industria/Periodo)?", "type": "text"})
+                  needed.append({"key": "scope", "text": "Escopo (País/Setor/Período)?", "type": "text"})
 
         # Special case: Refinement requested
         if existing_answers.get("needs_refinement") and "extra_context" not in existing_answers:
             needed.append({
                 "key": "extra_context", 
-                "text": "No encontramos lo que buscabas. ¿Podrías darnos más detalles o corregir algún dato?", 
+                "text": "Não encontramos o que você procurava. Pode fornecer mais detalhes ou corrigir algum dato?", 
                 "type": "text"
             })
 
@@ -230,7 +236,7 @@ class ResolutionOrchestrator:
         # Add "Refine search" option
         candidates.append({
             "candidate_id": "refine_search",
-            "label": "Ninguno coincide - Refinar búsqueda",
+            "label": "Nenhum corresponde - Refinar busca",
             "type": qt,
             "confidence": 0.0,
             "requires_profile_url": False,
