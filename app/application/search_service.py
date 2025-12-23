@@ -154,6 +154,7 @@ class ResolutionOrchestrator:
                 "requires_profile_url": False, "metadata": {"url": request.query_text}
             }]
 
+        answers = request.disambiguation_answers_json or {}
         qt = answers.get("intent") or request.query_type
         # Prioritize the refined 'main_query' if provided, otherwise use original
         query_text = answers.get("main_query") or request.query_text
