@@ -20,7 +20,8 @@ class SearchRequestCreate(BaseModel):
 class Question(BaseModel):
     key: str
     text: str
-    type: str = "text" # text, choice, etc.
+    type: str = "text" # text, choice, select, etc.
+    options: Optional[List[Dict[str, Any]]] = None
 
 class Candidate(BaseModel):
     candidate_id: str
