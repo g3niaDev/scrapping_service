@@ -42,6 +42,8 @@ class SearchRequestResponse(BaseModel):
     request_id: UUID
     status: SearchRequestStatus
     query_type: QueryType
+    query_text: str
+    disambiguation_answers: Optional[Dict[str, Any]] = None
     next: NextAction
 
 # Disambiguation Input

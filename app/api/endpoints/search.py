@@ -31,6 +31,8 @@ async def create_search_request(
         request_id=req.id,
         status=req.status,
         query_type=req.query_type,
+        query_text=req.query_text,
+        disambiguation_answers=req.disambiguation_answers_json,
         next=NextAction(**next_step)
     )
 
@@ -56,6 +58,33 @@ async def process_disambiguation(
         request_id=req.id,
         status=req.status,
         query_type=req.query_type,
+        query_text=req.query_text,
+        disambiguation_answers=req.disambiguation_answers_json,
+        next=NextAction(**next_step)
+    )
+
+@router.get(
+    "/requests/{request_id}",
+    response_model=SearchRequestResponse,
+    summary="Get Search Request Status",
+    description="Retrieve the complete state of a search request at any stage, including query text, status, and next actions."
+)
+async def get_search_request(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    service = SearchService(db)
+    req = await service.get_request(request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    
+    next_step = ResolutionOrchestrator.get_next_step(req)
+    return SearchRequestResponse(
+        request_id=req.id,
+        status=req.status,
+        query_type=req.query_type,
+        query_text=req.query_text,
+        disambiguation_answers=req.disambiguation_answers_json,
         next=NextAction(**next_step)
     )
 
@@ -99,6 +128,8 @@ async def confirm_candidate(
         request_id=req.id,
         status=req.status,
         query_type=req.query_type,
+        query_text=req.query_text,
+        disambiguation_answers=req.disambiguation_answers_json,
         next=NextAction(**next_step)
     )
 
@@ -139,5 +170,7 @@ async def refine_search_request(
         request_id=req.id,
         status=req.status,
         query_type=req.query_type,
+        query_text=req.query_text,
+        disambiguation_answers=req.disambiguation_answers_json,
         next=NextAction(**next_step)
     )
