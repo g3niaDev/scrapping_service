@@ -101,3 +101,19 @@ async def confirm_candidate(
         query_type=req.query_type,
         next=NextAction(**next_step)
     )
+
+@router.delete(
+    "/requests/{request_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete Search Request",
+    description="Deletes a search request and all its associated data."
+)
+async def delete_search_request(
+    request_id: UUID,
+    db: AsyncSession = Depends(get_db)
+):
+    service = SearchService(db)
+    success = await service.delete_request(request_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="SearchRequest not found")
+    return None

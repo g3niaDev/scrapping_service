@@ -5,6 +5,15 @@ from sqlalchemy.future import select
 from app.domain.models import SearchRequest, SearchRequestStatus, QueryType, QueryClassifierKey
 from app.api.schemas import SearchRequestCreate, DisambiguationInput, ConfirmationInput
 from app.config.settings import settings
+from app.infrastructure.google_search_client import GoogleSearchClient
+
+# Geo-Prioritization Constants
+BRAZIL = "br"
+NEIGHBORS = ["ar", "bo", "co", "gf", "gy", "py", "pe", "sr", "uy", "ve"]
+LATAM = [
+    "ar", "bo", "br", "cl", "co", "cr", "cu", "do", "ec", "sv", "gq", "gt", 
+    "hn", "mx", "ni", "pa", "py", "pe", "pr", "uy", "ve"
+]
 
 class QueryRouter:
     """Classifies the intent of the query."""
@@ -87,6 +96,19 @@ class ResolutionOrchestrator:
                 needed.append({"key": "company_or_industry", "text": "¿Empresa actual o industria?", "type": "text"})
             if "role" not in existing_answers:
                  needed.append({"key": "role", "text": "¿Rol aproximado?", "type": "text"})
+            if "social_network" not in existing_answers:
+                needed.append({
+                    "key": "social_network", 
+                    "text": "¿En qué red social prefieres buscar?", 
+                    "type": "select",
+                    "options": [
+                        {"value": "linkedin", "label": "LinkedIn"},
+                        {"value": "twitter", "label": "Twitter/X"},
+                        {"value": "instagram", "label": "Instagram"},
+                        {"value": "github", "label": "GitHub"},
+                        {"value": "any", "label": "Cualquiera"}
+                    ]
+                })
         elif q_type == QueryType.COMPANY:
             if "country" not in existing_answers:
                  needed.append({"key": "country", "text": "¿País de la empresa?", "type": "text"})
@@ -94,16 +116,24 @@ class ResolutionOrchestrator:
              if "scope" not in existing_answers:
                   needed.append({"key": "scope", "text": "¿Alcance (País/Industria/Periodo)?", "type": "text"})
 
+        # Special case: Refinement requested
+        if existing_answers.get("needs_refinement") and "extra_context" not in existing_answers:
+            needed.append({
+                "key": "extra_context", 
+                "text": "No encontramos lo que buscabas. ¿Podrías darnos más detalles o corregir algún dato?", 
+                "type": "text"
+            })
+
         return needed
 
     @staticmethod
-    def resolve_candidates(request: SearchRequest) -> List[dict]:
+    async def resolve_candidates(request: SearchRequest) -> List[dict]:
         """
-        Generates mock candidates based on answers.
-        In a real app, this would call Google Custom Search, LinkedIn API, etc.
+        Generates candidates based on answers.
+        Integrates Google Custom Search API.
         """
         qt = request.query_type
-        query = request.query_text
+        query_text = request.query_text
         answers = request.disambiguation_answers_json or {}
         
         candidates = []
@@ -112,55 +142,100 @@ class ResolutionOrchestrator:
             # Direct URL
             return [{
                 "candidate_id": "direct_url",
-                "label": f"Web Page: {query}",
+                "label": f"Web Page: {query_text}",
                 "type": QueryType.WEB_PAGE,
                 "confidence": 1.0,
                 "requires_profile_url": False,
-                "metadata": {"url": query}
+                "metadata": {"url": query_text}
             }]
-            
-        elif qt == QueryType.PERSON:
-            loc = answers.get("location", "Unknown Location")
-            role = answers.get("role", "Unknown Role")
-            lbl = f"{query} - {role} - {loc}"
-            
-            # Dummy logic: 2 candidates
-            candidates.append({
-                "candidate_id": "c1",
-                "label": lbl + " (LinkedIn)",
-                "type": QueryType.PERSON,
-                "confidence": 0.8,
-                "requires_profile_url": True, # User must provide link
-                "metadata": {"source": "manual_match"}
-            })
-            candidates.append({
-                "candidate_id": "c2",
-                "label": lbl + " (Other Profile)",
-                "type": QueryType.PERSON,
-                "confidence": 0.4,
-                "requires_profile_url": True,
-                "metadata": {"source": "manual_match"}
-            })
 
+        # Construct search query for Google
+        search_query = query_text
+        if qt == QueryType.PERSON:
+            loc = answers.get("location", "")
+            role = answers.get("role", "")
+            company = answers.get("company_or_industry", "")
+            social = answers.get("social_network", "")
+            site_limit = f"site:{social}.com" if social and social != "any" else ""
+            search_query = f"{query_text} {role} {company} {loc} {site_limit}".strip()
         elif qt == QueryType.COMPANY:
-             candidates.append({
-                "candidate_id": "co1",
-                "label": f"{query} - Corporate Site",
-                "type": QueryType.COMPANY,
-                "confidence": 0.9,
-                "requires_profile_url": True, # need website url
-                "metadata": {}
-             })
-
+            country = answers.get("country", "")
+            search_query = f"{query_text} {country}".strip()
         elif qt == QueryType.TOPIC:
-             candidates.append({
-                "candidate_id": "t1",
-                "label": f"Research Topic: {query} ({answers.get('scope', 'Global')})",
-                "type": QueryType.TOPIC,
-                "confidence": 1.0,
-                "requires_profile_url": False,
-                "metadata": {}
-             })
+            scope = answers.get("scope", "")
+            search_query = f"{query_text} {scope}".strip()
+
+        # Add extra context if it was a refinement
+        if answers.get("extra_context"):
+            search_query += f" {answers['extra_context']}"
+
+        # Call Google Search
+        client = GoogleSearchClient()
+        
+        # Determine pl (Priority Location) parameter
+        # Priority: 1. Specific location if provided, 2. Brazil (br), 3. Neighbors, 4. LATAM
+        pl_code = BRAZIL # Default to Brazil
+        
+        # Try to find a country code in answers (e.g. location or country key)
+        loc_str = (answers.get("location") or answers.get("country") or "").lower()
+        
+        # Simple mapping for common LATAM country names to codes if user didn't provide code
+        # In a real app, this would be more robust
+        country_name_map = {
+            "brasil": "br", "brazil": "br",
+            "argentina": "ar", "bolivia": "bo", "colombia": "co",
+            "paraguay": "py", "peru": "pe", "uruguay": "uy", "venezuela": "ve",
+            "chile": "cl", "mexico": "mx", "méxico": "mx", "ecuador": "ec"
+        }
+        
+        found_code = None
+        for name, code in country_name_map.items():
+            if name in loc_str:
+                found_code = code
+                break
+        
+        # If we found a specific country, use it
+        if found_code:
+            pl_code = found_code
+        
+        try:
+            results = await client.search(search_query, num_results=3, pl=pl_code)
+        except Exception as e:
+            # Log error and maybe fallback or raise
+            print(f"Error calling Google Search: {e}")
+            results = []
+
+        for i, res in enumerate(results):
+            # Extract important information for the preview
+            # Some sites have extra info in pagemap (e.g. LinkedIn roles, Twitter bios)
+            pagemap = res.get("pagemap", {})
+            metatags = pagemap.get("metatags", [{}])[0]
+            
+            # Use og:description or snippet for the preview
+            snippet = metatags.get("og:description") or res.get("snippet", "")
+            
+            candidates.append({
+                "candidate_id": f"google_{i}",
+                "label": res["title"],
+                "type": qt,
+                "confidence": 0.9 - (i * 0.1), # Simple heuristic
+                "requires_profile_url": False, # We already have the URL
+                "metadata": {
+                    "url": res["link"],
+                    "snippet": snippet,
+                    "display_link": res.get("displayLink")
+                }
+            })
+        
+        # Add "Refine search" option
+        candidates.append({
+            "candidate_id": "refine_search",
+            "label": "Ninguno coincide - Refinar búsqueda",
+            "type": qt,
+            "confidence": 0.0,
+            "requires_profile_url": False,
+            "metadata": {"action": "refine"}
+        })
              
         return candidates
 
@@ -191,7 +266,7 @@ class SearchService:
             # If WEB_PAGE (url), we might skip disambiguation if valid
             if req.query_type == QueryType.WEB_PAGE:
                  req.status = SearchRequestStatus.AWAITING_CONFIRMATION
-                 req.candidates_json = ResolutionOrchestrator.resolve_candidates(req)
+                 req.candidates_json = await ResolutionOrchestrator.resolve_candidates(req)
             else:
                  req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
         else:
@@ -228,7 +303,7 @@ class SearchService:
         
         if not remaining_questions:
              # Enough info! Generate Candidates
-             candidates = ResolutionOrchestrator.resolve_candidates(req)
+             candidates = await ResolutionOrchestrator.resolve_candidates(req)
              req.candidates_json = candidates
              req.status = SearchRequestStatus.AWAITING_CONFIRMATION
         else:
@@ -244,6 +319,19 @@ class SearchService:
         if not req:
              raise ValueError("Request not found")
              
+        # Handle Refinement Case
+        if data.candidate_id == "refine_search":
+            current_answers = req.disambiguation_answers_json or {}
+            current_answers["needs_refinement"] = True
+            # Clear previous refinement answer if any to force re-ask
+            current_answers.pop("extra_context", None)
+            req.disambiguation_answers_json = current_answers
+            req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
+            self.db.add(req)
+            await self.db.commit()
+            await self.db.refresh(req)
+            return req
+
         # Validate Candidate
         candidates = req.candidates_json or []
         selected = next((c for c in candidates if c['candidate_id'] == data.candidate_id), None)
@@ -277,3 +365,12 @@ class SearchService:
         await self.db.commit()
         await self.db.refresh(req)
         return req
+
+    async def delete_request(self, request_id: UUID) -> bool:
+        req = await self.get_request(request_id)
+        if not req:
+            return False
+            
+        await self.db.delete(req)
+        await self.db.commit()
+        return True
