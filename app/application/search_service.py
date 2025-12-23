@@ -95,6 +95,10 @@ class ResolutionOrchestrator:
         existing_answers = request.disambiguation_answers_json or {}
         
         needed = []
+        # We only ask for specific details if the initial search wasn't enough (Refinement)
+        if not existing_answers.get("needs_refinement") and q_type != QueryType.UNKNOWN:
+            return []
+
         if q_type == QueryType.PERSON:
             if "location" not in existing_answers:
                 needed.append({"key": "location", "text": "Em qual país/cidade trabalha?", "type": "text"})
@@ -122,7 +126,7 @@ class ResolutionOrchestrator:
              if "scope" not in existing_answers:
                   needed.append({"key": "scope", "text": "Escopo (País/Setor/Período)?", "type": "text"})
 
-        # Special case: Refinement requested
+        # Special case: Extra details prompt
         if existing_answers.get("needs_refinement") and "extra_context" not in existing_answers:
             needed.append({
                 "key": "extra_context", 
@@ -205,7 +209,7 @@ class ResolutionOrchestrator:
             pl_code = found_code
         
         try:
-            results = await client.search(search_query, num_results=3, pl=pl_code)
+            results = await client.search(search_query, num_results=6, pl=pl_code)
         except Exception as e:
             # Log error and maybe fallback or raise
             print(f"Error calling Google Search: {e}")
@@ -267,19 +271,24 @@ class SearchService:
         )
         
         # 3. Handle Classification results
-        if len(q_types) == 1:
-            req.query_type = q_types[0]
+        if q_types:
+            req.query_type = q_types[0] # Auto-select the most confident intent
             # If WEB_PAGE (url), we might skip disambiguation if valid
             if req.query_type == QueryType.WEB_PAGE:
                  req.status = SearchRequestStatus.AWAITING_CONFIRMATION
                  req.candidates_json = await ResolutionOrchestrator.resolve_candidates(req)
             else:
-                 req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
+                 # Always try to resolve candidates for a determined intent first
+                 req.candidates_json = await ResolutionOrchestrator.resolve_candidates(req)
+                 req.status = SearchRequestStatus.AWAITING_CONFIRMATION
         else:
-             # AMBIGUITY DETECTED
+             # No intent classified, or ambiguity not resolved by auto-selection
              req.query_type = QueryType.UNKNOWN
              req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
-             req.resolved_intent_json = {"potential_types": q_types}
+             # If there were potential types but none were selected, or if it's truly unknown
+             if q_types: # This means there were potential types, but we still marked it UNKNOWN for disambiguation
+                 req.resolved_intent_json = {"potential_types": q_types}
+
 
         self.db.add(req)
         await self.db.commit()
