@@ -72,9 +72,9 @@ class ResolutionOrchestrator:
         # 1. Search Type (Intent)
         if is_refining or request.query_type == QueryType.UNKNOWN or "intent" not in answers:
             intent_options = [
-                {"value": QueryType.PERSON, "label": "Individual Profile (Person)"},
-                {"value": QueryType.COMPANY, "label": "Organization / Company"},
-                {"value": QueryType.TOPIC, "label": "Generic Topic / Research Report"},
+                {"value": "PERSON", "label": "Individual Profile (Person)"},
+                {"value": "COMPANY", "label": "Organization / Company"},
+                {"value": "TOPIC", "label": "Generic Topic / Research Report"},
             ]
             questions.append({
                 "key": "intent",

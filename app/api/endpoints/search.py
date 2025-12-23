@@ -153,7 +153,20 @@ async def delete_search_request(
     "/requests/{request_id}/refine", 
     response_model=SearchRequestResponse,
     summary="Refine Search Request",
-    description="Explicitly triggers a refinement flow to add more context to the search."
+    description="""Triggers refinement mode to edit all search parameters.
+    
+    **Workflow:**
+    1. Call this endpoint to activate refinement mode
+    2. The response will include `next.action: "provide_disambiguation"` with ALL questions
+    3. Each question will have `current_value` pre-filled with previous answers
+    4. User can edit any field (main_query, intent, platform, context, extra_context)
+    5. Submit updated answers to `/disambiguation` endpoint
+    
+    **Response includes:**
+    - All original questions with current values
+    - Allows editing the main search query
+    - Provides textarea for additional context
+    """
 )
 async def refine_search_request(
     request_id: UUID,
