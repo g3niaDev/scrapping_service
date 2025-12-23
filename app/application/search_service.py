@@ -95,9 +95,9 @@ class ResolutionOrchestrator:
         existing_answers = request.disambiguation_answers_json or {}
         
         needed = []
-        # We only ask for specific details if the initial search wasn't enough (Refinement)
-        if not existing_answers.get("needs_refinement") and q_type != QueryType.UNKNOWN:
-            return []
+        # We always ask for specific details for non-URL queries on the first pass
+        # unless it's a refinement or truly unknown/empty
+        is_refinement = existing_answers.get("needs_refinement", False)
 
         if q_type == QueryType.PERSON:
             if "location" not in existing_answers:
@@ -278,9 +278,8 @@ class SearchService:
                  req.status = SearchRequestStatus.AWAITING_CONFIRMATION
                  req.candidates_json = await ResolutionOrchestrator.resolve_candidates(req)
             else:
-                 # Always try to resolve candidates for a determined intent first
-                 req.candidates_json = await ResolutionOrchestrator.resolve_candidates(req)
-                 req.status = SearchRequestStatus.AWAITING_CONFIRMATION
+                 # Restore friction: always go to disambiguation first for non-WebPage
+                 req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
         else:
              # No intent classified, or ambiguity not resolved by auto-selection
              req.query_type = QueryType.UNKNOWN
