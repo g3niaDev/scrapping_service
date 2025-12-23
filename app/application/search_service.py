@@ -126,8 +126,8 @@ class ResolutionOrchestrator:
         if is_refining:
             questions.append({
                 "key": "extra_context",
-                "text": "Any other specific detail (e.g. current company, city)?",
-                "type": "text",
+                "text": "Add any additional details or keywords to refine the search",
+                "type": "textarea",
                 "current_value": answers.get("extra_context")
             })
 
@@ -213,11 +213,18 @@ class ResolutionOrchestrator:
                 }
             })
 
-        # Refine search option
+        # 1. Refine search option (Back to questions)
         candidates.append({
-            "candidate_id": "refine_search", "label": "Nenhum corresponde - Refinar busca",
+            "candidate_id": "refine_search", "label": "No match found - Refine search questions",
             "type": qt, "confidence": 0.0,
             "requires_profile_url": False, "metadata": {"action": "refine"}
+        })
+
+        # 2. Manual Entry (Directly provide the link + optional notes)
+        candidates.append({
+            "candidate_id": "manual_entry", "label": "None of these - I want to provide the link manually",
+            "type": qt, "confidence": 0.0,
+            "requires_profile_url": True, "metadata": {"action": "manual"}
         })
              
         return candidates
@@ -300,14 +307,22 @@ class SearchService:
 
         candidates = req.candidates_json or []
         selected = next((c for c in candidates if c['candidate_id'] == data.candidate_id), None)
-        if not selected: raise ValueError("Invalid candidate_id")
+        
+        # If it's manual entry, we might not have a pre-existing candidate object with all data
+        if not selected and data.candidate_id != "manual_entry":
+             raise ValueError("Invalid candidate_id")
              
         req.selected_candidate_id = data.candidate_id
-        req.selected_candidate_json = selected
-        target_url = data.profile_url or selected.get('metadata', {}).get('url') or req.query_text
+        
+        # Target URL: 1. Manual profile_url, 2. metadata url, 3. original query
+        target_url = data.profile_url or (selected.get('metadata', {}).get('url') if selected else None) or req.query_text
+        
+        label = selected['label'] if selected else f"Manual: {target_url}"
+        
+        req.selected_candidate_json = selected or {"label": label, "candidate_id": data.candidate_id}
         
         req.final_target_json = {
-            "type": req.query_type, "label": selected['label'],
+            "type": req.query_type, "label": label,
             "identifiers": {"url": target_url}, "constraints": {}
         }
         
