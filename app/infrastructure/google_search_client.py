@@ -25,7 +25,7 @@ class GoogleSearchClient:
             "cx": self.cse_id,
             "q": query,
             "num": num_results,
-            "hl": hl,
+            # "hl": hl,
             "pws": pws
         }
 
