@@ -160,12 +160,27 @@ class ResolutionOrchestrator:
         search_context = answers.get("search_context") or answers.get("country_search", "")
         extra_context = answers.get("extra_context", "")
 
+        # Map search context to country codes for country-scoped domains (e.g., LinkedIn)
+        region_map = {
+            "United States": "us",
+            "Brazil": "br",
+            "Mexico": "mx",
+            "Spain": "es",
+            "Venezuela": "ve",
+            "Colombia": "co",
+            "Argentina": "ar",
+            "Global": None
+        }
+        country_code = region_map.get(search_context)
+
         # Target identifier
         site_base = ""
 
         if platform != "google":
-            site_base = platform
-            # site_base = f"site:{platform}.com"
+            if platform == "linkedin" and country_code:
+                site_base = f"site:{country_code}.linkedin.com"
+            else:
+                site_base = f"site:{platform}.com"
 
         # Construct Global Query
         # Include extra_context if provided
@@ -190,7 +205,7 @@ class ResolutionOrchestrator:
             results = []
 
         candidates = []
-        for i, res in enumerate(results[:6]):
+        for i, res in enumerate(results[:10]):
             # Simple type inference for visual feedback
             inferred_type = qt
             link = res["link"].lower()
