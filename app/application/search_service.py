@@ -104,15 +104,12 @@ class ResolutionOrchestrator:
             region_options = [
                 {"value": "Global", "label": "Global Search (No region limit)"},
                 {"value": "United States", "label": "United States"},
-                {"value": "Europe", "label": "Europe (EU)"},
-                {"value": "Latin America", "label": "Latin America (LATAM)"},
                 {"value": "Brazil", "label": "Brazil"},
                 {"value": "Mexico", "label": "Mexico"},
                 {"value": "Spain", "label": "Spain"},
                 {"value": "Venezuela", "label": "Venezuela"},
                 {"value": "Colombia", "label": "Colombia"},
                 {"value": "Argentina", "label": "Argentina"},
-                {"value": "Tech Industry", "label": "Tech Industry / Startup"},
             ]
             questions.append({
                 "key": "search_context",
@@ -160,30 +157,45 @@ class ResolutionOrchestrator:
         query_text = answers.get("main_query") or request.query_text
         
         platform = (answers.get("search_platform") or "google").lower()
-        context = answers.get("search_context", "")
-        extra = answers.get("extra_context", "")
+        search_context = answers.get("search_context", "")
+        extra_context = answers.get("extra_context", "")
+        
+        # Map search context to Google Custom Search country codes (gl parameter)
+        region_map = {
+            "United States": "us",
+            "Brazil": "br",
+            "Mexico": "mx",
+            "Spain": "es",
+            "Venezuela": "ve",
+            "Colombia": "co",
+            "Argentina": "ar",
+            "Global": None  # No geographic restriction
+        }
+        
+        gl_param = region_map.get(search_context)
 
         # Target identifier
         site_base = ""
 
-        if platform == "linkedin":
-            if qt == QueryType.PERSON:
-                site_base = "site:linkedin.com/in/"
-            elif qt == QueryType.COMPANY:
-                site_base = "site:linkedin.com/company/"
-            else:
-                site_base = "site:linkedin.com"
-        else:
-            if platform != "google":
-                site_base = f"site:{platform}.com"
+        if platform != "google":
+            site_base = f"site:{platform}.com"
 
-        # Construct Global Query (Simple & Direct)
-        # We include the 'extra' info if it exists
-        search_query = f'"{query_text}" {context} {extra} {site_base}'.strip()
+        # Construct Global Query
+        # Include extra_context if provided
+        query_parts = [f'"{query_text}"']
+        
+        if extra_context:
+            query_parts.append(extra_context)
+        
+        if site_base:
+            query_parts.append(site_base)
+        
+        search_query = " ".join(query_parts).strip()
 
         client = GoogleSearchClient()
         try:
-            results = await client.search(search_query, num_results=10)
+            # Pass gl parameter for geographic filtering when applicable
+            results = await client.search(search_query, num_results=10, gl=gl_param)
         except Exception as e:
             print(f"Error calling Google Search: {e}")
             results = []
