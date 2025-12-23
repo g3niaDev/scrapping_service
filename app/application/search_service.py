@@ -116,7 +116,7 @@ class ResolutionOrchestrator:
                 "text": "In which region, country or industry do you want to locate the results?",
                 "type": "select",
                 "options": region_options,
-                "current_value": answers.get("search_context")
+                "current_value": answers.get("search_context") or answers.get("country_search")
             })
 
         # 4. Extra Context (Only for Refinement)
@@ -157,22 +157,8 @@ class ResolutionOrchestrator:
         query_text = answers.get("main_query") or request.query_text
         
         platform = (answers.get("search_platform") or "google").lower()
-        search_context = answers.get("search_context", "")
+        search_context = answers.get("search_context") or answers.get("country_search", "")
         extra_context = answers.get("extra_context", "")
-        
-        # Map search context to Google Custom Search country codes (gl parameter)
-        region_map = {
-            "United States": "us",
-            "Brazil": "br",
-            "Mexico": "mx",
-            "Spain": "es",
-            "Venezuela": "ve",
-            "Colombia": "co",
-            "Argentina": "ar",
-            "Global": None  # No geographic restriction
-        }
-        
-        gl_param = region_map.get(search_context)
 
         # Target identifier
         site_base = ""
@@ -189,13 +175,15 @@ class ResolutionOrchestrator:
         
         if site_base:
             query_parts.append(site_base)
+
+        if search_context:
+            query_parts.append(search_context)
         
         search_query = " ".join(query_parts).strip()
 
         client = GoogleSearchClient()
         try:
-            # Pass gl parameter for geographic filtering when applicable
-            results = await client.search(search_query, num_results=10, gl=gl_param)
+            results = await client.search(search_query, num_results=10)
         except Exception as e:
             print(f"Error calling Google Search: {e}")
             results = []

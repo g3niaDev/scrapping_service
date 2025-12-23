@@ -12,7 +12,6 @@ class GoogleSearchClient:
         self, 
         query: str, 
         num_results: int = 3, 
-        gl: Optional[str] = None, 
         hl: Optional[str] = "es",
         pws: int = 0
     ) -> List[Dict[str, Any]]:
@@ -29,8 +28,6 @@ class GoogleSearchClient:
             "hl": hl,
             "pws": pws
         }
-        if gl:
-            params["gl"] = gl
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(self.base_url, params=params)
