@@ -22,6 +22,7 @@ class Question(BaseModel):
     text: str
     type: str = "text" # text, choice, select, etc.
     options: Optional[List[Dict[str, Any]]] = None
+    current_value: Optional[Any] = None
 
 class Candidate(BaseModel):
     candidate_id: str
