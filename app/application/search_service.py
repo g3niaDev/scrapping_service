@@ -51,49 +51,54 @@ class ResolutionOrchestrator:
 
     @staticmethod
     def _generate_questions(request: SearchRequest) -> list:
-        intent_info = request.resolved_intent_json or {}
-        potential_types = intent_info.get("potential_types", [])
-        
-        if request.query_type == QueryType.UNKNOWN and len(potential_types) > 1:
-            intent_labels = {
-                QueryType.PERSON: "Pessoa", QueryType.COMPANY: "Empresa",
-                QueryType.TOPIC: "Tópico", QueryType.WEB_PAGE: "Página Web"
-            }
-            options = [{"value": t, "label": intent_labels.get(t, t.title())} for t in potential_types]
-            return [{"key": "intent", "text": "O que você está procurando exatamente?", "type": "select", "options": options}]
-
-        q_type = request.query_type
+        """
+        Universal strategy: Ask for Type, Platform, and Context/Region.
+        """
         answers = request.disambiguation_answers_json or {}
         needed = []
-        is_refinement = answers.get("needs_refinement", False)
 
-        if q_type == QueryType.PERSON:
-            if "location" not in answers: needed.append({"key": "location", "text": "Em qual país/cidade trabalha?", "type": "text"})
-            if "company_or_industry" not in answers: needed.append({"key": "company_or_industry", "text": "Empresa atual o setor?", "type": "text"})
-            if "role" not in answers: needed.append({"key": "role", "text": "Cargo aproximado?", "type": "text"})
-            if "social_network" not in answers:
-                needed.append({
-                    "key": "social_network", "text": "Rede social preferida?", "type": "select",
-                    "options": [
-                        {"value": "linkedin", "label": "LinkedIn"}, {"value": "twitter", "label": "Twitter/X"},
-                        {"value": "instagram", "label": "Instagram"}, {"value": "github", "label": "GitHub"},
-                        {"value": "any", "label": "Qualquer uma"}
-                    ]
-                })
-        elif q_type == QueryType.COMPANY:
-            if "country" not in answers: needed.append({"key": "country", "text": "País da empresa?", "type": "text"})
-        elif q_type == QueryType.TOPIC:
-             if "scope" not in answers: needed.append({"key": "scope", "text": "Escopo (País/Setor/Período)?", "type": "text"})
+        # 1. Search Type (Intent)
+        if request.query_type == QueryType.UNKNOWN or "intent" not in answers:
+            intent_options = [
+                {"value": QueryType.PERSON, "label": "Búsqueda de Persona (LinkedIn/Social)"},
+                {"value": QueryType.COMPANY, "label": "Búsqueda de Empresa o Marca"},
+                {"value": QueryType.TOPIC, "label": "Tema, Reporte o Información General"},
+            ]
+            needed.append({
+                "key": "intent",
+                "text": "¿Qué tipo de búsqueda deseas realizar?",
+                "type": "select",
+                "options": intent_options
+            })
 
-        if is_refinement and "extra_context" not in answers:
-            needed.append({"key": "extra_context", "text": "Mais detalhes para refinar a busca?", "type": "text"})
+        # 2. Platform/Source
+        if "search_platform" not in answers:
+            needed.append({
+                "key": "search_platform",
+                "text": "¿Dónde prefieres buscar la información?",
+                "type": "select",
+                "options": [
+                    {"value": "linkedin", "label": "LinkedIn (Recomendado para Personas/Empresas)"},
+                    {"value": "google", "label": "Google Web (General)"},
+                    {"value": "twitter", "label": "Twitter/X"},
+                    {"value": "github", "label": "GitHub"},
+                ]
+            })
 
-        return needed
+        # 3. Context / Region / Details
+        if "search_context" not in answers:
+            needed.append({
+                "key": "search_context",
+                "text": "¿En qué región, país o empresa deseas localizar los resultados?",
+                "type": "text"
+            })
+
+        return list(needed)
 
     @staticmethod
     async def resolve_candidates(request: SearchRequest) -> List[dict]:
         """
-        Simple search resolved with the user's query text and disambiguation answers.
+        Global search strategy using user query + platform + simplified context.
         """
         if request.query_type == QueryType.WEB_PAGE:
             return [{
@@ -106,27 +111,27 @@ class ResolutionOrchestrator:
         query_text = request.query_text
         answers = request.disambiguation_answers_json or {}
         
-        role = answers.get("role", "")
-        company = answers.get("company_or_industry", "")
-        loc = answers.get("location", "") or answers.get("country", "")
-        extra = answers.get("extra_context", "")
-        social = (answers.get("social_network") or "").lower()
+        platform = (answers.get("search_platform") or "google").lower()
+        context = answers.get("search_context", "")
 
-        # 1. Specialized Query Building
-        if social == "linkedin":
+        # Target identifiers and exclusions
+        exclusions = ""
+        site_base = ""
+
+        if platform == "linkedin":
             if qt == QueryType.PERSON:
                 site_base = "site:linkedin.com/in/"
             elif qt == QueryType.COMPANY:
                 site_base = "site:linkedin.com/company/"
             else:
                 site_base = "site:linkedin.com"
-            
-            # Add strict exclusions for internal search/directories
             exclusions = "-inurl:/pub/dir -inurl:/search/ -inurl:/results/ -intitle:profiles"
-            search_query = f'"{query_text}" {role} {company} {loc} {site_base} {extra} {exclusions}'.strip()
         else:
-            site_limit = f"site:{social}.com" if social and social != "any" else ""
-            search_query = f'"{query_text}" {role} {company} {loc} {site_limit} {extra}'.strip()
+            if platform != "google":
+                site_base = f"site:{platform}.com"
+
+        # Construct Global Query
+        search_query = f'"{query_text}" {context} {site_base} {exclusions}'.strip()
 
         client = GoogleSearchClient()
         try:
@@ -135,7 +140,7 @@ class ResolutionOrchestrator:
             print(f"Error calling Google Search: {e}")
             results = []
 
-        # 2. Result Filtering (Discard anything that still looks like a directory)
+        # Result Filtering (Discard anything that still looks like a directory)
         filtered_results = []
         skip_patterns = ["/pub/dir", "/search/", "/results/", "/dir/"]
         
