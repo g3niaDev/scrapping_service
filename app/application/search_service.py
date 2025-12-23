@@ -1,20 +1,11 @@
 from uuid import UUID
-from typing import Optional, Dict, Any, List, Set
+from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
 from app.domain.models import SearchRequest, SearchRequestStatus, QueryType, QueryClassifierKey
 from app.api.schemas import SearchRequestCreate, DisambiguationInput, ConfirmationInput
 from app.config.settings import settings
 from app.infrastructure.google_search_client import GoogleSearchClient
-
-# Geo-Prioritization Constants
-BRAZIL = "br"
-NEIGHBORS = ["ar", "bo", "co", "gf", "gy", "py", "pe", "sr", "uy", "ve"]
-LATAM = [
-    "ar", "bo", "br", "cl", "co", "cr", "cu", "do", "ec", "sv", "gq", "gt", 
-    "hn", "mx", "ni", "pa", "py", "pe", "pr", "uy", "ve"
-]
 
 class QueryRouter:
     """Classifies the intent of the query."""
@@ -35,7 +26,6 @@ class QueryRouter:
         
         # 3. Fallback: Multi-language Name Heuristic
         raw_words = t.split()
-        # Simple heuristic: 2-4 words often represent a name
         if 2 <= len(raw_words) <= settings.PERSON_NAME_MAX_WORDS:
             found_types.add(QueryType.PERSON)
             
@@ -79,7 +69,7 @@ class ResolutionOrchestrator:
 
         if q_type == QueryType.PERSON:
             if "location" not in answers: needed.append({"key": "location", "text": "Em qual país/cidade trabalha?", "type": "text"})
-            if "company_or_industry" not in answers: needed.append({"key": "company_or_industry", "text": "Empresa atual ou setor?", "type": "text"})
+            if "company_or_industry" not in answers: needed.append({"key": "company_or_industry", "text": "Empresa atual o setor?", "type": "text"})
             if "role" not in answers: needed.append({"key": "role", "text": "Cargo aproximado?", "type": "text"})
             if "social_network" not in answers:
                 needed.append({
@@ -101,119 +91,10 @@ class ResolutionOrchestrator:
         return needed
 
     @staticmethod
-    def normalize_url(url: str) -> str:
-        """Removes tracking params and fragments."""
-        try:
-            parsed = urlparse(url)
-            # Remove fragment
-            parsed = parsed._replace(fragment="")
-            # Clean query params
-            qs = parse_qs(parsed.query)
-            # Common trackers to remove
-            trackers = {'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'fbclid', 'gclid', 'ref', 's', 't'}
-            filtered_qs = {k: v for k, v in qs.items() if k.lower() not in trackers}
-            
-            new_query = urlencode(filtered_qs, doseq=True)
-            return urlunparse(parsed._replace(query=new_query)).lower().rstrip("/")
-        except:
-            return url.lower()
-
-    @staticmethod
-    def classify_result(url: str, title: str, snippet: str, intent: QueryType) -> Dict[str, Any]:
-        """
-        Classifies URL as final_page vs listing/search.
-        Infers result_type (PROFILE, COMPANY_PAGE, ARTICLE, LISTING, SEARCH_PAGE).
-        """
-        url_lower = url.lower()
-        title_lower = title.lower()
-        
-        # 1. Type Inference
-        res_type = "ARTICLE"
-        if "linkedin.com/in/" in url_lower or "twitter.com/" in url_lower or "instagram.com/" in url_lower or "github.com/" in url_lower:
-             # Basic checks for profiles on socials
-             if any(x in url_lower for x in ["/status/", "/post/", "/p/", "/reels/"]): res_type = "ARTICLE"
-             else: res_type = "PROFILE"
-        elif "linkedin.com/company/" in url_lower or "linkedin.com/school/" in url_lower:
-             res_type = "COMPANY_PAGE"
-        elif "linkedin.com/jobs/" in url_lower:
-             res_type = "JOB"
-
-        # 2. Listing/Search Heuristics
-        is_listing = False
-        listing_paths = ["/search", "/results", "/directory", "/dir", "/tag", "/category", "/tags", "/topic"]
-        listing_titles = ["results", "profiles", "perfiles", "directorio", "600+", "lista de", "list of"]
-        
-        if any(p in url_lower for p in listing_paths):
-            is_listing = True
-        if any(t in title_lower for t in listing_titles):
-            is_listing = True
-            
-        # Refine if it's a search page
-        if "/search" in url_lower or "search_query" in url_lower or "q=" in url_lower:
-            res_type = "SEARCH_PAGE"
-            is_listing = True
-        elif is_listing and res_type not in ["PROFILE", "COMPANY_PAGE"]:
-            res_type = "LISTING"
-
-        # Special case for LinkedIn aggregate pages
-        if "linkedin.com/pub/dir" in url_lower:
-            res_type = "LISTING"
-            is_listing = True
-
-        return {
-            "result_type": res_type,
-            "is_listing": is_listing,
-            "priority": 1 if not is_listing else 0
-        }
-
-    @staticmethod
-    def generate_search_queries(request: SearchRequest) -> List[str]:
-        """Generates 2-3 queries: Strict + Fallback."""
-        qt = request.query_type
-        name = request.query_text
-        answers = request.disambiguation_answers_json or {}
-        social = (answers.get("social_network") or "").lower()
-        
-        queries = []
-        
-        if qt == QueryType.PERSON:
-            role = answers.get("role", "")
-            company = answers.get("company_or_industry", "")
-            loc = answers.get("location", "") or answers.get("country", "")
-            
-            # Query 1: Strict with site and specifics
-            site_part = f"site:{social}.com" if social and social != "any" else "site:linkedin.com"
-            strict = f'"{name}" {role} {company} {loc} {site_part}'.strip()
-            queries.append(strict)
-            
-            # Query 2: Fallback (broader keywords, less restrictive site)
-            fallback = f'"{name}" {role or company} {loc}'.strip()
-            queries.append(fallback)
-            
-        elif qt == QueryType.COMPANY:
-            country = answers.get("country", "")
-            # Strict
-            queries.append(f'"{name}" {country} site:linkedin.com/company OR site:crunchbase.com'.strip())
-            # Fallback
-            queries.append(f'"{name}" {country} official website'.strip())
-            
-        elif qt == QueryType.TOPIC:
-            scope = answers.get("scope", "")
-            queries.append(f"{name} {scope}".strip())
-            queries.append(f'"{name}" overview report {scope}'.strip())
-            
-        else:
-            queries.append(name)
-            
-        # Add extra context to all if present
-        extra = answers.get("extra_context")
-        if extra:
-            queries = [f"{q} {extra}" for q in queries]
-            
-        return queries[:3]
-
-    @staticmethod
     async def resolve_candidates(request: SearchRequest) -> List[dict]:
+        """
+        Simple search resolved with the user's query text and disambiguation answers.
+        """
         if request.query_type == QueryType.WEB_PAGE:
             return [{
                 "candidate_id": "direct_url", "label": f"Web Page: {request.query_text}",
@@ -221,91 +102,61 @@ class ResolutionOrchestrator:
                 "requires_profile_url": False, "metadata": {"url": request.query_text}
             }]
 
-        # 1. Execute Multiple Queries
-        queries = ResolutionOrchestrator.generate_search_queries(request)
-        client = GoogleSearchClient()
-        all_items = []
+        qt = request.query_type
+        query_text = request.query_text
+        answers = request.disambiguation_answers_json or {}
         
-        for q in queries:
-            try:
-                results = await client.search(q, num_results=10)
-                all_items.extend(results)
-            except Exception as e:
-                print(f"Error for query '{q}': {e}")
-                
-        # 2. Normalize and Deduplicate
-        seen_urls = set()
-        unique_results = []
-        for item in all_items:
-            norm_url = ResolutionOrchestrator.normalize_url(item["link"])
-            if norm_url not in seen_urls:
-                seen_urls.add(norm_url)
-                item["normalized_link"] = norm_url
-                unique_results.append(item)
+        # Construct simple query
+        role = answers.get("role", "")
+        company = answers.get("company_or_industry", "")
+        loc = answers.get("location", "") or answers.get("country", "")
+        extra = answers.get("extra_context", "")
+        social = (answers.get("social_network") or "").lower()
+        site_limit = f"site:{social}.com" if social and social != "any" else ""
+        
+        # Back to the requested simplicity: essentially user text + context
+        search_query = f"{query_text} {role} {company} {loc} {site_limit} {extra}".strip()
 
-        # 3. Classify and Score
-        processed = []
-        for res in unique_results:
+        client = GoogleSearchClient()
+        try:
+            results = await client.search(search_query, num_results=10)
+        except Exception as e:
+            print(f"Error calling Google Search: {e}")
+            results = []
+
+        candidates = []
+        for i, res in enumerate(results[:6]):
+            # Simple type inference for visual feedback
+            inferred_type = qt
+            link = res["link"].lower()
+            if "linkedin.com/in/" in link: inferred_type = QueryType.PROFILE
+            elif "linkedin.com/company/" in link: inferred_type = QueryType.COMPANY_PAGE
+            
             pagemap = res.get("pagemap", {})
             metatags = pagemap.get("metatags", [{}])[0]
             snippet = metatags.get("og:description") or res.get("snippet", "")
-            
-            classification = ResolutionOrchestrator.classify_result(res["link"], res["title"], snippet, request.query_type)
-            
-            processed.append({
-                "title": res["title"],
-                "link": res["link"],
-                "snippet": snippet,
-                "display_link": res.get("displayLink"),
-                **classification
-            })
 
-        # 4. Sorting logic
-        # For PERSON/COMPANY: Final pages first.
-        # For TOPIC: Penalize internal search only.
-        if request.query_type in [QueryType.PERSON, QueryType.COMPANY]:
-            # Sort by Priority (final vs listing) DESC, then original order (relevance)
-            processed.sort(key=lambda x: x["priority"], reverse=True)
-            
-            # Discard listings if we have at least 3 final pages
-            final_pages = [p for p in processed if not p["is_listing"]]
-            if len(final_pages) >= 3:
-                processed = [p for p in processed if not p["is_listing"] or p["priority"] > 0]
-        
-        elif request.query_type == QueryType.TOPIC:
-            # Penalize search pages (query params)
-            def topic_score(item):
-                if item["result_type"] == "SEARCH_PAGE": return -10
-                if item["is_listing"]: return -1 # Slight penalty for listings/tags
-                return 10
-            processed.sort(key=topic_score, reverse=True)
-
-        # 5. Map to Candidates (Top 6)
-        candidates = []
-        for i, res in enumerate(processed[:6]):
             candidates.append({
-                "candidate_id": f"res_{i}",
+                "candidate_id": f"google_{i}",
                 "label": res["title"],
-                "type": res["result_type"],
-                "confidence": 0.95 - (i * 0.1),
+                "type": inferred_type,
+                "confidence": 0.9 - (i * 0.1),
                 "requires_profile_url": False,
                 "metadata": {
                     "url": res["link"],
-                    "snippet": res["snippet"],
-                    "display_link": res["display_link"],
-                    "result_type": res["result_type"],
-                    "is_listing": res["is_listing"]
+                    "snippet": snippet,
+                    "display_link": res.get("displayLink")
                 }
             })
 
+        # Refine search option
         candidates.append({
             "candidate_id": "refine_search", "label": "Nenhum corresponde - Refinar busca",
-            "type": request.query_type, "confidence": 0.0,
+            "type": qt, "confidence": 0.0,
             "requires_profile_url": False, "metadata": {"action": "refine"}
         })
              
         return candidates
-
 
 class SearchService:
     def __init__(self, db: AsyncSession):
