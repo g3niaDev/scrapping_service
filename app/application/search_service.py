@@ -58,7 +58,7 @@ class ResolutionOrchestrator:
         if request.status == SearchRequestStatus.NEEDS_DISAMBIGUATION:
             questions = ResolutionOrchestrator._generate_questions(request)
             return {"action": "provide_disambiguation", "questions": questions}
-
+| 
         # 2. Ready for Candidates?
         if request.status == SearchRequestStatus.CANDIDATES_READY or request.status == SearchRequestStatus.AWAITING_CONFIRMATION:
              candidates = request.candidates_json or []
@@ -129,11 +129,103 @@ class ResolutionOrchestrator:
         if is_refinement and "extra_context" not in existing_answers:
             needed.append({
                 "key": "extra_context", 
-                "text": "Não encontramos o que você procurava. Pode fornecer mais detalhes ou corrigir algum dato?", 
+                "text": "Não encontramos o que você procurava. Pode fornecer mais detalhes o corrigir algum dato?", 
                 "type": "text"
             })
 
         return needed
+
+    @staticmethod
+    def build_linkedin_query(name: str, answers: dict) -> str:
+        """
+        Builds a specialized LinkedIn query to avoid directories and prioritize real assets.
+        """
+        role = answers.get("role", "")
+        company = answers.get("company_or_industry", "")
+        location = answers.get("location", "") or answers.get("country", "")
+        extra = answers.get("extra_context", "")
+
+        # 1. Keywords optimization
+        keywords = []
+        if role: keywords.append(f'"{role}"')
+        if company: keywords.append(f'"{company}"')
+        if extra: keywords.append(extra)
+        
+        keywords_str = f"({' OR '.join(keywords)})" if keywords else ""
+        
+        # 2. Base Query
+        q = f'"{name}" {keywords_str} {location}'.strip()
+        
+        # 3. Restriction to real LinkedIn paths
+        paths = [
+            "site:linkedin.com/in",
+            "site:linkedin.com/company",
+            "site:linkedin.com/school",
+            "site:linkedin.com/jobs",
+            "site:linkedin.com/posts",
+            "site:linkedin.com/pulse"
+        ]
+        path_limit = f"({' OR '.join(paths)})"
+        
+        # 4. Compulsory exclusions (anti-directory)
+        exclusions = [
+            "-inurl:/pub/dir",
+            "-inurl:/pub/",
+            "-inurl:/dir/",
+            "-intitle:profiles",
+            "-intitle:perfiles"
+        ]
+        
+        final_query = f"{q} {path_limit} {' '.join(exclusions)}"
+        return final_query
+
+    @staticmethod
+    def filter_and_rank_linkedin_results(items: List[dict]) -> List[dict]:
+        """
+        Filters out directories and ranks by asset priority.
+        """
+        filtered = []
+        priority_paths = [
+            "linkedin.com/in/",
+            "linkedin.com/company/",
+            "linkedin.com/school/",
+            "linkedin.com/jobs/",
+            "linkedin.com/posts/",
+            "linkedin.com/pulse/"
+        ]
+        
+        skip_patterns = ["linkedin.com/pub/dir", "linkedin.com/pub/", "linkedin.com/dir/"]
+        
+        for item in items:
+            link = item.get("link", "").lower()
+            
+            # Exclusion logic
+            if any(p in link for p in skip_patterns):
+                continue
+            
+            # Type inference
+            asset_type = "unknown"
+            if "/in/" in link: asset_type = "PERSON"
+            elif "/company/" in link: asset_type = "COMPANY"
+            elif "/school/" in link: asset_type = "SCHOOL"
+            elif "/jobs/" in link: asset_type = "JOB"
+            elif "/posts/" in link or "/pulse/" in link: asset_type = "ARTICLE"
+            
+            item["inferred_type"] = asset_type
+            
+            # Priority score
+            score = 0
+            for i, p in enumerate(priority_paths):
+                if p in link:
+                    score = 10 - i
+                    break
+            
+            item["priority_score"] = score
+            filtered.append(item)
+            
+        # Sort by priority score DESC
+        filtered.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
+        return filtered
 
     @staticmethod
     async def resolve_candidates(request: SearchRequest) -> List[dict]:
@@ -144,11 +236,11 @@ class ResolutionOrchestrator:
         qt = request.query_type
         query_text = request.query_text
         answers = request.disambiguation_answers_json or {}
-        
+        social = (answers.get("social_network") or "").lower()
+
         candidates = []
         
         if qt == QueryType.WEB_PAGE:
-            # Direct URL
             return [{
                 "candidate_id": "direct_url",
                 "label": f"Web Page: {query_text}",
@@ -158,86 +250,69 @@ class ResolutionOrchestrator:
                 "metadata": {"url": query_text}
             }]
 
-        # Construct search query for Google
-        search_query = query_text
-        if qt == QueryType.PERSON:
-            loc = answers.get("location", "")
+        # 1. Build Query
+        if social == "linkedin":
+            search_query = ResolutionOrchestrator.build_linkedin_query(query_text, answers)
+        else:
+            # Generic query construction
             role = answers.get("role", "")
             company = answers.get("company_or_industry", "")
-            social = (answers.get("social_network") or "").lower()
+            loc = answers.get("location", "") or answers.get("country", "")
+            extra = answers.get("extra_context", "")
             site_limit = f"site:{social}.com" if social and social != "any" else ""
-                
-            search_query = f"{query_text} {role} {company} {loc} {site_limit}".strip()
-        elif qt == QueryType.COMPANY:
-            country = answers.get("country", "")
-            search_query = f"{query_text} {country}".strip()
-        elif qt == QueryType.TOPIC:
-            scope = answers.get("scope", "")
-            search_query = f"{query_text} {scope}".strip()
+            search_query = f"{query_text} {role} {company} {loc} {site_limit} {extra}".strip()
 
-        # Add extra context if it was a refinement
-        if answers.get("extra_context"):
-            search_query += f" {answers['extra_context']}"
-
-        # Call Google Search
+        # 2. Call Google Search
         client = GoogleSearchClient()
         
-        # Determine pl (Priority Location) parameter
-        # Priority: 1. Specific location if provided, 2. Brazil (br), 3. Neighbors, 4. LATAM
-        pl_code = BRAZIL # Default to Brazil
-        
-        # Try to find a country code in answers (e.g. location or country key)
-        loc_str = (answers.get("location") or answers.get("country") or "").lower()
-        
-        # Simple mapping for common LATAM country names to codes if user didn't provide code
-        # In a real app, this would be more robust
+        # Determine GL (Geographical Location) mapping
         country_name_map = {
             "brasil": "br", "brazil": "br",
             "argentina": "ar", "bolivia": "bo", "colombia": "co",
             "paraguay": "py", "peru": "pe", "uruguay": "uy", "venezuela": "ve",
-            "chile": "cl", "mexico": "mx", "méxico": "mx", "ecuador": "ec"
+            "chile": "cl", "mexico": "mx", "méxico": "mx", "ecuador": "ec", "panama": "pa"
         }
         
-        found_code = None
+        loc_str = (answers.get("location") or answers.get("country") or "").lower()
+        gl_code = None
         for name, code in country_name_map.items():
             if name in loc_str:
-                found_code = code
+                gl_code = code
                 break
-        
-        # If we found a specific country, use it
-        if found_code:
-            pl_code = found_code
-        
+
         try:
-            results = await client.search(search_query, num_results=6, pl=pl_code)
+            results = await client.search(search_query, num_results=10, gl=gl_code, hl="es", pws=0)
         except Exception as e:
-            # Log error and maybe fallback or raise
             print(f"Error calling Google Search: {e}")
             results = []
 
-        for i, res in enumerate(results):
-            # Extract important information for the preview
-            # Some sites have extra info in pagemap (e.g. LinkedIn roles, Twitter bios)
+        # 3. Post-processing
+        if social == "linkedin":
+            results = ResolutionOrchestrator.filter_and_rank_linkedin_results(results)
+
+        # 4. Map to Candidates
+        for i, res in enumerate(results[:6]):
             pagemap = res.get("pagemap", {})
             metatags = pagemap.get("metatags", [{}])[0]
-            
-            # Use og:description or snippet for the preview
             snippet = metatags.get("og:description") or res.get("snippet", "")
+            
+            inferred_type = res.get("inferred_type", str(qt))
             
             candidates.append({
                 "candidate_id": f"google_{i}",
                 "label": res["title"],
-                "type": qt,
-                "confidence": 0.9 - (i * 0.1), # Simple heuristic
-                "requires_profile_url": False, # We already have the URL
+                "type": inferred_type,
+                "confidence": 0.9 - (i * 0.1),
+                "requires_profile_url": False,
                 "metadata": {
                     "url": res["link"],
                     "snippet": snippet,
-                    "display_link": res.get("displayLink")
+                    "display_link": res.get("displayLink"),
+                    "inferred_type": inferred_type
                 }
             })
-        
-        # Add "Refine search" option
+
+        # Add \"Refine search\" option
         candidates.append({
             "candidate_id": "refine_search",
             "label": "Nenhum corresponde - Refinar busca",

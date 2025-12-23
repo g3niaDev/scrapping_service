@@ -8,7 +8,14 @@ class GoogleSearchClient:
         self.cse_id = settings.GOOGLE_CSE_ID
         self.base_url = "https://customsearch.googleapis.com/customsearch/v1"
 
-    async def search(self, query: str, num_results: int = 3, pl: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def search(
+        self, 
+        query: str, 
+        num_results: int = 3, 
+        gl: Optional[str] = None, 
+        hl: Optional[str] = "es",
+        pws: int = 0
+    ) -> List[Dict[str, Any]]:
         if not self.api_key or not self.cse_id:
             # Fallback for development if keys are missing
             print("WARNING: GOOGLE_API_KEY or GOOGLE_CSE_ID missing. Returning mock results.")
@@ -18,10 +25,12 @@ class GoogleSearchClient:
             "key": self.api_key,
             "cx": self.cse_id,
             "q": query,
-            "num": num_results
+            "num": num_results,
+            "hl": hl,
+            "pws": pws
         }
-        if pl:
-            params["pl"] = pl
+        if gl:
+            params["gl"] = gl
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(self.base_url, params=params)
