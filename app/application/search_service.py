@@ -182,7 +182,7 @@ class ResolutionOrchestrator:
 
         # Construct Global Query
         # Include extra_context if provided
-        query_parts = [f'"{query_text}"']
+        query_parts = [query_text]
         
         if extra_context:
             query_parts.append(extra_context)
