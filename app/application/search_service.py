@@ -273,6 +273,11 @@ class SearchService:
         
         current_answers = req.disambiguation_answers_json or {}
         current_answers.update(data.answers)
+        
+        # Clear refinement flag after user submits refined answers
+        # This allows the system to proceed to candidate generation
+        current_answers.pop("needs_refinement", None)
+        
         req.disambiguation_answers_json = current_answers
         
         # Force SQLAlchemy to detect the JSON field change
