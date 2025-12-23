@@ -53,6 +53,7 @@ class ResolutionOrchestrator:
     def _generate_questions(request: SearchRequest) -> list:
         """
         Universal strategy: Ask for Type, Platform, and Context/Region.
+        Always in English. Use selection elements.
         """
         answers = request.disambiguation_answers_json or {}
         needed = []
@@ -60,13 +61,13 @@ class ResolutionOrchestrator:
         # 1. Search Type (Intent)
         if request.query_type == QueryType.UNKNOWN or "intent" not in answers:
             intent_options = [
-                {"value": QueryType.PERSON, "label": "Búsqueda de Persona (LinkedIn/Social)"},
-                {"value": QueryType.COMPANY, "label": "Búsqueda de Empresa o Marca"},
-                {"value": QueryType.TOPIC, "label": "Tema, Reporte o Información General"},
+                {"value": QueryType.PERSON, "label": "Individual Profile (Person)"},
+                {"value": QueryType.COMPANY, "label": "Organization / Company"},
+                {"value": QueryType.TOPIC, "label": "Generic Topic / Research Report"},
             ]
             needed.append({
                 "key": "intent",
-                "text": "¿Qué tipo de búsqueda deseas realizar?",
+                "text": "What type of search do you want to perform?",
                 "type": "select",
                 "options": intent_options
             })
@@ -75,22 +76,38 @@ class ResolutionOrchestrator:
         if "search_platform" not in answers:
             needed.append({
                 "key": "search_platform",
-                "text": "¿Dónde prefieres buscar la información?",
+                "text": "Where do you prefer to search for information?",
                 "type": "select",
                 "options": [
-                    {"value": "linkedin", "label": "LinkedIn (Recomendado para Personas/Empresas)"},
-                    {"value": "google", "label": "Google Web (General)"},
-                    {"value": "twitter", "label": "Twitter/X"},
-                    {"value": "github", "label": "GitHub"},
+                    {"value": "linkedin", "label": "LinkedIn (Social/Professional)"},
+                    {"value": "google", "label": "Google Web (All sources)"},
+                    {"value": "twitter", "label": "Twitter / X"},
+                    {"value": "github", "label": "GitHub (Code/Tech)"},
                 ]
             })
 
         # 3. Context / Region / Details
         if "search_context" not in answers:
+            # For the 'selection through elements in DB' - since we don't have a dedicated Region table,
+            # we provide a curated list of relevant search contexts/regions as options.
+            region_options = [
+                {"value": "Global", "label": "Global Search (No region limit)"},
+                {"value": "United States", "label": "United States"},
+                {"value": "Europe", "label": "Europe (EU)"},
+                {"value": "Latin America", "label": "Latin America (LATAM)"},
+                {"value": "Brazil", "label": "Brazil"},
+                {"value": "Mexico", "label": "Mexico"},
+                {"value": "Spain", "label": "Spain"},
+                {"value": "Venezuela", "label": "Venezuela"},
+                {"value": "Colombia", "label": "Colombia"},
+                {"value": "Argentina", "label": "Argentina"},
+                {"value": "Tech Industry", "label": "Tech Industry / Startup"},
+            ]
             needed.append({
                 "key": "search_context",
-                "text": "¿En qué región, país o empresa deseas localizar los resultados?",
-                "type": "text"
+                "text": "In which region, country or industry do you want to locate the results?",
+                "type": "select",
+                "options": region_options
             })
 
         return list(needed)
