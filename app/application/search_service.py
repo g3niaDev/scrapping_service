@@ -146,8 +146,8 @@ class ResolutionOrchestrator:
 
         # 1. Keywords optimization
         keywords = []
-        if role: keywords.append(f'"{role}"')
-        if company: keywords.append(f'"{company}"')
+        if role: keywords.append(role)
+        if company: keywords.append(company)
         if extra: keywords.append(extra)
         
         keywords_str = f"({' OR '.join(keywords)})" if keywords else ""
@@ -280,7 +280,7 @@ class ResolutionOrchestrator:
                 break
 
         try:
-            results = await client.search(search_query, num_results=10, gl=gl_code, hl="es", pws=0)
+            results = await client.search(search_query, num_results=10)
         except Exception as e:
             print(f"Error calling Google Search: {e}")
             results = []
