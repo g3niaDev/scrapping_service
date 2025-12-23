@@ -126,9 +126,19 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         # Simple ping to the broker
         with celery_app.connection_or_acquire() as conn:
             conn.ensure_connection(max_retries=1)
-            health_status["components"]["redis_broker"] = "connected"
+            # Mask sensitive part of the URL
+            raw_url = settings.REDIS_URL
+            masked_url = raw_url.split('@')[-1] if '@' in raw_url else raw_url
+            health_status["components"]["redis"] = {
+                "status": "connected",
+                "broker_endpoint": masked_url
+            }
     except Exception as e:
         health_status["status"] = "degraded"
-        health_status["components"]["redis_broker"] = f"error: {str(e)}"
+        health_status["components"]["redis"] = {
+            "status": "error",
+            "message": str(e),
+            "broker_endpoint": settings.REDIS_URL.split('@')[-1] if '@' in settings.REDIS_URL else "unknown"
+        }
 
     return health_status
