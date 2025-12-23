@@ -173,11 +173,11 @@ class ResolutionOrchestrator:
         if extra_context:
             query_parts.append(extra_context)
         
-        if site_base:
-            query_parts.append(site_base)
-
         if search_context:
             query_parts.append(search_context)
+
+        if site_base:
+            query_parts.append(site_base)
         
         search_query = " ".join(query_parts).strip()
 
