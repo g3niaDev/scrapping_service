@@ -106,16 +106,27 @@ class ResolutionOrchestrator:
         query_text = request.query_text
         answers = request.disambiguation_answers_json or {}
         
-        # Construct simple query
         role = answers.get("role", "")
         company = answers.get("company_or_industry", "")
         loc = answers.get("location", "") or answers.get("country", "")
         extra = answers.get("extra_context", "")
         social = (answers.get("social_network") or "").lower()
-        site_limit = f"site:{social}.com" if social and social != "any" else ""
-        
-        # Back to the requested simplicity: essentially user text + context
-        search_query = f"{query_text} {role} {company} {loc} {site_limit} {extra}".strip()
+
+        # 1. Specialized Query Building
+        if social == "linkedin":
+            if qt == QueryType.PERSON:
+                site_base = "site:linkedin.com/in/"
+            elif qt == QueryType.COMPANY:
+                site_base = "site:linkedin.com/company/"
+            else:
+                site_base = "site:linkedin.com"
+            
+            # Add strict exclusions for internal search/directories
+            exclusions = "-inurl:/pub/dir -inurl:/search/ -inurl:/results/ -intitle:profiles"
+            search_query = f'"{query_text}" {role} {company} {loc} {site_base} {extra} {exclusions}'.strip()
+        else:
+            site_limit = f"site:{social}.com" if social and social != "any" else ""
+            search_query = f'"{query_text}" {role} {company} {loc} {site_limit} {extra}'.strip()
 
         client = GoogleSearchClient()
         try:
@@ -124,8 +135,18 @@ class ResolutionOrchestrator:
             print(f"Error calling Google Search: {e}")
             results = []
 
+        # 2. Result Filtering (Discard anything that still looks like a directory)
+        filtered_results = []
+        skip_patterns = ["/pub/dir", "/search/", "/results/", "/dir/"]
+        
+        for res in results:
+            link = res["link"].lower()
+            if any(p in link for p in skip_patterns):
+                continue
+            filtered_results.append(res)
+            
         candidates = []
-        for i, res in enumerate(results[:6]):
+        for i, res in enumerate(filtered_results[:6]):
             # Simple type inference for visual feedback
             inferred_type = qt
             link = res["link"].lower()
