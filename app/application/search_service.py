@@ -164,7 +164,8 @@ class ResolutionOrchestrator:
         site_base = ""
 
         if platform != "google":
-            site_base = f"site:{platform}.com"
+            site_base = platform
+            # site_base = f"site:{platform}.com"
 
         # Construct Global Query
         # Include extra_context if provided
