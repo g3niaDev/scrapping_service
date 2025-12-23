@@ -275,6 +275,10 @@ class SearchService:
         current_answers.update(data.answers)
         req.disambiguation_answers_json = current_answers
         
+        # Force SQLAlchemy to detect the JSON field change
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(req, "disambiguation_answers_json")
+        
         if "intent" in data.answers and req.query_type == QueryType.UNKNOWN:
             req.query_type = data.answers["intent"]
         
@@ -299,6 +303,11 @@ class SearchService:
             cur["needs_refinement"] = True
             cur.pop("extra_context", None)
             req.disambiguation_answers_json = cur
+            
+            # Force SQLAlchemy to detect the JSON field change
+            from sqlalchemy.orm.attributes import flag_modified
+            flag_modified(req, "disambiguation_answers_json")
+            
             req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
             self.db.add(req)
             await self.db.commit()
@@ -348,6 +357,11 @@ class SearchService:
         req.disambiguation_answers_json = cur
         req.status = SearchRequestStatus.NEEDS_DISAMBIGUATION
         req.candidates_json = []
+        
+        # Force SQLAlchemy to detect the JSON field change
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(req, "disambiguation_answers_json")
+        
         self.db.add(req)
         await self.db.commit()
         await self.db.refresh(req)
