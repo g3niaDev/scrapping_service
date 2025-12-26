@@ -9,6 +9,7 @@ from app.infrastructure.database import engine # Async engine - wait, Celery is 
 # Actually, sqlmodel/sqlalchemy async engine can be used with `run_sync`, or we create a sync engine for Celery.
 # To keep it simple and standard: create a Sync engine for Celery workers.
 from sqlmodel import create_engine
+from sqlalchemy.pool import NullPool
 
 from app.config.settings import settings
 from app.domain.models import ResearchJob, JobStatus, QueryType, ResearchReport, Source, Fact
@@ -24,7 +25,10 @@ sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg")
 if "postgresql://" in sync_db_url and "+" not in sync_db_url:
     sync_db_url = sync_db_url.replace("postgresql://", "postgresql+psycopg://")
 
-sync_engine = create_engine(sync_db_url)
+sync_engine = create_engine(
+    sync_db_url,
+    poolclass=NullPool,
+)
 
 @shared_task(name="perform_research", bind=True)
 def perform_research_task(self, job_id_str: str, intent_str: str, target: str):

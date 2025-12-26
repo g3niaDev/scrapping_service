@@ -1,4 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
 from app.config.settings import settings
@@ -13,7 +14,13 @@ elif "+asyncpg" in db_url:
     db_url = db_url.replace("+asyncpg", "+psycopg")
 
 # Generic Async Postgres connection
-engine = create_async_engine(db_url, echo=False, future=True)
+# Use NullPool so every session opens a new connection and closes it when done.
+engine = create_async_engine(
+    db_url,
+    echo=False,
+    future=True,
+    poolclass=NullPool,
+)
 
 async def get_session() -> AsyncSession:
     async_session = sessionmaker(
