@@ -187,7 +187,7 @@ class ResolutionOrchestrator:
         if extra_context:
             query_parts.append(extra_context)
         
-        if search_context:
+        if search_context and search_context != "Global":
             query_parts.append(search_context)
 
         if site_base:
