@@ -178,7 +178,7 @@ class ResolutionOrchestrator:
 
         if platform != "google":
             # Use only the platform name to broaden results (e.g., site:linkedin, site:github, site:twitter)
-            site_base = f"site:{platform}"
+            site_base = f"{platform}"
 
         # Construct Global Query
         # Include extra_context if provided
