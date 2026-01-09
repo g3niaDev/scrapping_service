@@ -177,10 +177,8 @@ class ResolutionOrchestrator:
         site_base = ""
 
         if platform != "google":
-            if platform == "linkedin" and country_code:
-                site_base = f"site:{country_code}.linkedin.com"
-            else:
-                site_base = f"site:{platform}.com"
+            # Use only the platform name to broaden results (e.g., site:linkedin, site:github, site:twitter)
+            site_base = f"site:{platform}"
 
         # Construct Global Query
         # Include extra_context if provided
