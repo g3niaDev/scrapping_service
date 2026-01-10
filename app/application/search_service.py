@@ -181,16 +181,18 @@ class ResolutionOrchestrator:
                 site_base = f"site:{domain}"
 
         # Construct Consolidated "Clean" Query
-        query_parts = [f'"{query_text}"']
+        query_parts = []
+        
+        if site_base:
+            query_parts.append(site_base)
+            
+        query_parts.append(f'"{query_text}"')
         
         if extra_context:
             query_parts.append(extra_context)
         
         if search_context and search_context != "Global":
             query_parts.append(search_context)
-
-        if site_base:
-            query_parts.append(site_base)
         
         search_query = " ".join(query_parts).strip()
 
