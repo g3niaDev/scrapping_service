@@ -167,22 +167,25 @@ class ResolutionOrchestrator:
         }
         
         site_base = ""
-        domain = platform_domain_map.get(platform)
-        if domain:
-            site_base = f"site:{domain}"
+        # Specialized LinkedIn paths to filter by profile type
+        if platform == "linkedin":
+            if qt in [QueryType.PERSON, QueryType.PROFILE]:
+                site_base = "site:linkedin.com/in/"
+            elif qt in [QueryType.COMPANY, QueryType.COMPANY_PAGE]:
+                site_base = "site:linkedin.com/company/"
+            else:
+                site_base = "site:linkedin.com"
+        else:
+            domain = platform_domain_map.get(platform)
+            if domain:
+                site_base = f"site:{domain}"
 
-        # Construct Global Query
-        # Include extra_context if provided
+        # Construct Consolidated "Clean" Query
         query_parts = [f'"{query_text}"']
         
         if extra_context:
             query_parts.append(extra_context)
         
-        # Exact Match + LinkedIn intitle hack
-        if platform == "linkedin" and (qt == QueryType.PERSON or qt == QueryType.PROFILE or "linkedin.com/in/" in query_text):
-            # Hack: ensure name is in the title of the search result
-            query_parts.append(f"intitle:{query_text}")
-
         if search_context and search_context != "Global":
             query_parts.append(search_context)
 
@@ -193,12 +196,7 @@ class ResolutionOrchestrator:
 
         client = GoogleSearchClient()
         try:
-            results = await client.search(
-                search_query, 
-                num_results=10,
-                exact_terms=query_text,
-                or_terms=extra_context if extra_context else None
-            )
+            results = await client.search(search_query, num_results=10)
         except Exception as e:
             print(f"Error calling Google Search: {e}")
             results = []
