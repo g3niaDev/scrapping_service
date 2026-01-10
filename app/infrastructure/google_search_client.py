@@ -13,7 +13,9 @@ class GoogleSearchClient:
         query: str, 
         num_results: int = 3, 
         hl: Optional[str] = "es",
-        pws: int = 0
+        pws: int = 0,
+        exact_terms: Optional[str] = None,
+        or_terms: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         if not self.api_key or not self.cse_id:
             # Fallback for development if keys are missing
@@ -28,6 +30,11 @@ class GoogleSearchClient:
             # "hl": hl,
             "pws": pws
         }
+
+        if exact_terms:
+            params["exactTerms"] = exact_terms
+        if or_terms:
+            params["orTerms"] = or_terms
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(self.base_url, params=params)

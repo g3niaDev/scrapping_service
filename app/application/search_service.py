@@ -178,6 +178,11 @@ class ResolutionOrchestrator:
         if extra_context:
             query_parts.append(extra_context)
         
+        # Exact Match + LinkedIn intitle hack
+        if platform == "linkedin" and (qt == QueryType.PERSON or qt == QueryType.PROFILE or "linkedin.com/in/" in query_text):
+            # Hack: ensure name is in the title of the search result
+            query_parts.append(f"intitle:{query_text}")
+
         if search_context and search_context != "Global":
             query_parts.append(search_context)
 
@@ -188,7 +193,12 @@ class ResolutionOrchestrator:
 
         client = GoogleSearchClient()
         try:
-            results = await client.search(search_query, num_results=10)
+            results = await client.search(
+                search_query, 
+                num_results=10,
+                exact_terms=query_text,
+                or_terms=extra_context if extra_context else None
+            )
         except Exception as e:
             print(f"Error calling Google Search: {e}")
             results = []
