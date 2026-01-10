@@ -160,6 +160,17 @@ class ResolutionOrchestrator:
         search_context = answers.get("search_context") or answers.get("country_search", "")
         extra_context = answers.get("extra_context", "")
 
+        region_map = {
+            "United States": "us",
+            "Brazil": "br",
+            "Mexico": "mx",
+            "Spain": "es",
+            "Venezuela": "ve",
+            "Colombia": "co",
+            "Argentina": "ar"
+        }
+        country_code = region_map.get(search_context)
+
         platform_domain_map = {
             "linkedin": "linkedin.com",
             "twitter": "twitter.com",
@@ -167,14 +178,15 @@ class ResolutionOrchestrator:
         }
         
         site_base = ""
-        # Specialized LinkedIn paths to filter by profile type
+        # Specialized and Regionalized LinkedIn paths
         if platform == "linkedin":
+            host = f"{country_code}.linkedin.com" if country_code else "linkedin.com"
             if qt in [QueryType.PERSON, QueryType.PROFILE]:
-                site_base = "site:linkedin.com/in/"
+                site_base = f"site:{host}/in/"
             elif qt in [QueryType.COMPANY, QueryType.COMPANY_PAGE]:
-                site_base = "site:linkedin.com/company/"
+                site_base = f"site:{host}/company/"
             else:
-                site_base = "site:linkedin.com"
+                site_base = f"site:{host}"
         else:
             domain = platform_domain_map.get(platform)
             if domain:
