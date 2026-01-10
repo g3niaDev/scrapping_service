@@ -160,29 +160,20 @@ class ResolutionOrchestrator:
         search_context = answers.get("search_context") or answers.get("country_search", "")
         extra_context = answers.get("extra_context", "")
 
-        # Map search context to country codes for country-scoped domains (e.g., LinkedIn)
-        region_map = {
-            "United States": "us",
-            "Brazil": "br",
-            "Mexico": "mx",
-            "Spain": "es",
-            "Venezuela": "ve",
-            "Colombia": "co",
-            "Argentina": "ar",
-            "Global": None
+        platform_domain_map = {
+            "linkedin": "linkedin.com",
+            "twitter": "twitter.com",
+            "github": "github.com"
         }
-        country_code = region_map.get(search_context)
-
-        # Target identifier
+        
         site_base = ""
-
-        if platform != "google":
-            # Use only the platform name to broaden results (e.g., site:linkedin, site:github, site:twitter)
-            site_base = f"{platform}"
+        domain = platform_domain_map.get(platform)
+        if domain:
+            site_base = f"site:{domain}"
 
         # Construct Global Query
         # Include extra_context if provided
-        query_parts = [query_text]
+        query_parts = [f'"{query_text}"']
         
         if extra_context:
             query_parts.append(extra_context)
