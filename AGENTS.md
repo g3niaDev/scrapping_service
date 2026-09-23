@@ -1,4 +1,4 @@
-# CLAUDE.md — research_companion
+# AGENTS.md — research_companion
 
 Microservicio backend para investigación automatizada de personas/empresas. Usa una "Search State Machine" determinista.
 
